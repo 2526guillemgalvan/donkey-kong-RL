@@ -1,0 +1,8 @@
+# Todo ignorado por defecto
+*
+
+# Solo incluir estos archivos
+!.gitignore
+!donkey_kong_ppo.ipynb
+!train_donkey_kong.py
+!donkey_kong_ppo.pth
