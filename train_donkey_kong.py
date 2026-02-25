@@ -98,7 +98,7 @@ class DonkeyKongHeightWrapper(gym.Wrapper):
     Se aplica ENCIMA del DonkeyKongWrapper base para no romper
     la compatibilidad del checkpoint (misma observation space).
     """
-    HEIGHT_BONUS = 0.005  # bonus por pixel de altura ganada
+    HEIGHT_BONUS = 0.02  # bonus por pixel de altura ganada
 
     def __init__(self, env):
         super().__init__(env)
@@ -449,6 +449,22 @@ def train(args):
                 f"LR {cur_lr:.2e}"
             )
 
+        # -- Guardar checkpoint cada 10 updates (sobreescribe el mismo .pth) --
+        if update_i % 10 == 0 or update_i == args.updates:
+            torch.save(
+                {
+                    "update": current_update,
+                    "global_step": global_step,
+                    "model_state": model.state_dict(),
+                    "optimizer_state": optimizer.state_dict(),
+                    "episode_rewards": episode_rewards,
+                    "update_losses": update_losses,
+                    "total_updates": total_updates,
+                    "hyperparams": hp,
+                },
+                args.checkpoint,
+            )
+
         # -- Evaluacion visual --
         if args.render and update_i % args.eval_interval == 0:
             print(f"\n  --- Evaluacion visual (update {current_update}) ---")
@@ -457,24 +473,8 @@ def train(args):
 
     envs.close()
 
-    # -- Guardar checkpoint actualizado --
-    final_update = start_update + args.updates
-    torch.save(
-        {
-            "update": final_update,
-            "global_step": global_step,
-            "model_state": model.state_dict(),
-            "optimizer_state": optimizer.state_dict(),
-            "episode_rewards": episode_rewards,
-            "update_losses": update_losses,
-            "total_updates": total_updates,
-            "hyperparams": hp,
-        },
-        args.checkpoint,
-    )
-
-    print(f"\nCheckpoint actualizado: {args.checkpoint}")
-    print(f"  Update total: {final_update}")
+    print(f"\nCheckpoint guardado: {args.checkpoint}")
+    print(f"  Update total: {start_update + args.updates}")
     print(f"  Global steps: {global_step:,}")
     print(f"  Episodios totales: {len(episode_rewards)}")
     if session_rewards:
