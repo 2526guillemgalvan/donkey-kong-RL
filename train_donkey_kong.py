@@ -90,15 +90,20 @@ class DonkeyKongWrapper(gym.Wrapper):
 
 
 class DonkeyKongHeightWrapper(gym.Wrapper):
-    """Wrapper adicional que da reward bonus por subir de altura.
+    """Wrapper adicional que da reward bonus por subir de altura
+    y penaliza por quedarse en la parte baja sin subir.
 
     Detecta la posicion Y de Mario en el frame RGB (pixeles rojos)
     y da un bonus cuando sube (Y decrece en coordenadas de pantalla).
+    Si Mario se queda en zona baja sin subir, recibe una penalizacion
+    creciente cuanto mas tiempo lleve ahi.
 
     Se aplica ENCIMA del DonkeyKongWrapper base para no romper
     la compatibilidad del checkpoint (misma observation space).
     """
-    HEIGHT_BONUS = 0.02  # bonus por pixel de altura ganada
+    CLIMB_BONUS = 0.02        # bonus por pixel de altura ganada al subir
+    HEIGHT_REWARD_SCALE = 0.03  # reward continuo proporcional a la altura
+    SCREEN_BOTTOM = 180       # Y de Mario en la parte mas baja
 
     def __init__(self, env):
         super().__init__(env)
@@ -127,8 +132,12 @@ class DonkeyKongHeightWrapper(gym.Wrapper):
             if mario_y is not None and self.prev_mario_y is not None:
                 delta_y = self.prev_mario_y - mario_y  # positivo = subir
                 if delta_y > 2:  # umbral para evitar ruido
-                    reward += delta_y * self.HEIGHT_BONUS
+                    reward += delta_y * self.CLIMB_BONUS
+            # Reward continuo por altura: mas alto = mas reward cada step
+            # En la parte baja (Y=180) da ~0, en la parte alta (Y=30) da ~0.025
             if mario_y is not None:
+                height_ratio = max(0, self.SCREEN_BOTTOM - mario_y) / self.SCREEN_BOTTOM
+                reward += height_ratio * self.HEIGHT_REWARD_SCALE
                 self.prev_mario_y = mario_y
         else:
             self.prev_mario_y = None
@@ -500,7 +509,7 @@ def main():
         "--updates", type=int, default=100, help="Updates adicionales de entrenamiento (default: 100)"
     )
     parser.add_argument(
-        "--eval-interval", type=int, default=25, help="Evaluar visualmente cada N updates (default: 25)"
+        "--eval-interval", type=int, default=100, help="Evaluar visualmente cada N updates (default: 100)"
     )
     parser.add_argument(
         "--no-render", dest="render", action="store_false",
