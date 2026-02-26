@@ -101,8 +101,8 @@ class DonkeyKongHeightWrapper(gym.Wrapper):
     Se aplica ENCIMA del DonkeyKongWrapper base para no romper
     la compatibilidad del checkpoint (misma observation space).
     """
-    CLIMB_BONUS = 0.02        # bonus por pixel de altura ganada al subir
-    HEIGHT_REWARD_SCALE = 0.03  # reward continuo proporcional a la altura
+    CLIMB_BONUS = 0.05        # bonus por pixel de altura ganada al subir
+    HEIGHT_REWARD_SCALE = 0.15  # reward continuo proporcional a la altura
     SCREEN_BOTTOM = 180       # Y de Mario en la parte mas baja
 
     def __init__(self, env):
@@ -509,7 +509,7 @@ def main():
         "--updates", type=int, default=100, help="Updates adicionales de entrenamiento (default: 100)"
     )
     parser.add_argument(
-        "--eval-interval", type=int, default=100, help="Evaluar visualmente cada N updates (default: 100)"
+        "--eval-interval", type=int, default=40, help="Evaluar visualmente cada N updates (default: 40)"
     )
     parser.add_argument(
         "--no-render", dest="render", action="store_false",
