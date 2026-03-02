@@ -90,57 +90,100 @@ class DonkeyKongWrapper(gym.Wrapper):
 
 
 class DonkeyKongHeightWrapper(gym.Wrapper):
-    """Wrapper adicional que da reward bonus por subir de altura
-    y penaliza por quedarse en la parte baja sin subir.
+    """Reward shaping con guia direccional por piso.
 
-    Detecta la posicion Y de Mario en el frame RGB (pixeles rojos)
-    y da un bonus cuando sube (Y decrece en coordenadas de pantalla).
-    Si Mario se queda en zona baja sin subir, recibe una penalizacion
-    creciente cuanto mas tiempo lleve ahi.
+    Mapa del nivel 1 de Donkey Kong:
+      Piso 1 (Y>160):     ir DERECHA hacia escalera (~X=110)
+      Piso 2 (130<Y<160): ir IZQUIERDA hacia escalera (~X=40)
+      Piso 3 (100<Y<130): ir DERECHA hacia escalera (~X=110)
+      Piso 4 (75<Y<100):  ir IZQUIERDA hacia escalera (~X=40)
+      Piso 5 (Y<75):      ir DERECHA hacia Pauline
 
-    Se aplica ENCIMA del DonkeyKongWrapper base para no romper
-    la compatibilidad del checkpoint (misma observation space).
+    Rewards:
+      - Bonus por subir de altura (climb)
+      - Bonus continuo por altura (mas alto = mas reward)
+      - Bonus direccional por moverse hacia la escalera correcta
     """
-    CLIMB_BONUS = 0.05        # bonus por pixel de altura ganada al subir
-    HEIGHT_REWARD_SCALE = 0.15  # reward continuo proporcional a la altura
-    SCREEN_BOTTOM = 180       # Y de Mario en la parte mas baja
+    CLIMB_BONUS = 0.05         # bonus por pixel de altura ganada
+    HEIGHT_REWARD_SCALE = 0.15 # reward continuo por altura
+    DIRECTION_BONUS = 0.02     # reward por moverse en la direccion correcta
+    LADDER_PROXIMITY_BONUS = 0.04  # bonus por estar cerca de una escalera
+    SCREEN_BOTTOM = 180
+
+    # Mapa de pisos: (Y_min, Y_max, [escaleras_x])
+    # Posiciones X reales de las escaleras en cada piso
+    FLOORS = [
+        (160, 200, [50, 82]),           # Piso 1: escaleras a X=50, X=82
+        (130, 160, [66, 90, 110]),      # Piso 2: escaleras a X=66, X=90, X=110
+        (100, 130, [50, 68, 102]),      # Piso 3: escaleras a X=50, X=68, X=102
+        (75, 100, [44, 56, 80, 92]),    # Piso 4: escaleras a X=44, X=56, X=80, X=92
+        (0, 75, [44, 56, 68, 78]),      # Piso 5: escaleras a X=44, X=56, X=68, X=78
+    ]
 
     def __init__(self, env):
         super().__init__(env)
         self.prev_mario_y = None
+        self.prev_mario_x = None
 
-    def _find_mario_y(self, raw_obs):
-        """Encuentra la Y media de Mario en el frame RGB."""
+    def _find_mario(self, raw_obs):
+        """Encuentra posicion (Y, X) de Mario via pixeles rojos."""
         r, g, b = raw_obs[:, :, 0], raw_obs[:, :, 1], raw_obs[:, :, 2]
         mario_mask = (r > 150) & (g < 80) & (b < 80)
-        ys = np.where(mario_mask)[0]
+        ys, xs = np.where(mario_mask)
         if len(ys) > 5:
-            return float(np.mean(ys))
+            return float(np.median(ys)), float(np.median(xs))
+        return None, None
+
+    def _get_nearest_ladder(self, mario_y, mario_x):
+        """Devuelve la X de la escalera mas cercana en el piso actual."""
+        for y_min, y_max, ladders in self.FLOORS:
+            if y_min <= mario_y < y_max:
+                if ladders:
+                    return min(ladders, key=lambda lx: abs(lx - mario_x))
         return None
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         raw = self.env.unwrapped.ale.getScreenRGB()
-        self.prev_mario_y = self._find_mario_y(raw)
+        self.prev_mario_y, self.prev_mario_x = self._find_mario(raw)
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         if not (terminated or truncated):
             raw = self.env.unwrapped.ale.getScreenRGB()
-            mario_y = self._find_mario_y(raw)
+            mario_y, mario_x = self._find_mario(raw)
+
             if mario_y is not None and self.prev_mario_y is not None:
-                delta_y = self.prev_mario_y - mario_y  # positivo = subir
-                if delta_y > 2:  # umbral para evitar ruido
+                # Bonus por subir
+                delta_y = self.prev_mario_y - mario_y
+                if delta_y > 2:
                     reward += delta_y * self.CLIMB_BONUS
-            # Reward continuo por altura: mas alto = mas reward cada step
-            # En la parte baja (Y=180) da ~0, en la parte alta (Y=30) da ~0.025
+
+            # Reward continuo por altura
             if mario_y is not None:
                 height_ratio = max(0, self.SCREEN_BOTTOM - mario_y) / self.SCREEN_BOTTOM
                 reward += height_ratio * self.HEIGHT_REWARD_SCALE
+
+            # Reward direccional: bonus por acercarse a la escalera mas cercana
+            if mario_x is not None and self.prev_mario_x is not None and mario_y is not None:
+                nearest = self._get_nearest_ladder(mario_y, mario_x)
+                if nearest is not None:
+                    prev_dist = abs(self.prev_mario_x - nearest)
+                    curr_dist = abs(mario_x - nearest)
+                    if prev_dist - curr_dist > 1:  # se acerco
+                        reward += self.DIRECTION_BONUS
+                    # Bonus extra por estar muy cerca de la escalera (< 8 pixeles)
+                    if curr_dist < 8:
+                        reward += self.LADDER_PROXIMITY_BONUS
+
+            if mario_y is not None:
                 self.prev_mario_y = mario_y
+            if mario_x is not None:
+                self.prev_mario_x = mario_x
         else:
             self.prev_mario_y = None
+            self.prev_mario_x = None
         return obs, reward, terminated, truncated, info
 
 
